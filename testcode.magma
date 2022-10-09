@@ -1,0 +1,26 @@
+N:= 4 ; 
+w:= 3/2; 
+S1:= RealField(10);
+
+M := HalfIntegralWeightForms(N,w);
+M;
+
+d := Dimension(M);
+d;
+
+B:= Basis(M);
+B;
+maxs := [];
+for x in [1..d] do
+	v := [];
+	for y in [1..100] do  
+		value := Coefficient(B[x],y)/(2*Pi(S1)*y^(w/2));
+		if value ne 0 then
+			v := Append(v,value);
+		end if;		
+	end for;
+	print(Maximum(v));	
+	print(Minimum(v));	
+	maxs := Append(maxs,Maximum(v));
+end for;
+print(maxs);
