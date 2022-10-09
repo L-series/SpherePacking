@@ -1,0 +1,248 @@
+QQ := RationalField();
+P<q> := PowerSeriesRing(QQ);
+ZZ := IntegerRing();
+R<q> := PowerSeriesRing(ZZ);
+
+/*
+  Returns the coefficients of the q-expansion at infinity padded
+  to the full precision of the q-expansion.
+*/
+getCoefficientsToPrecision := function(series, precision)
+  Coeffs, startpadding, d := Coefficients(series);
+  Coeffs := [ 0 : x in [1..startpadding] ] cat Coeffs;
+  endpadding := AbsolutePrecision(series) - ( #Coeffs );
+  Coeffs cat:= [ 0 : x in [1..endpadding] ];
+  //Coeffs;
+  return Coeffs;
+end function;
+
+getFileName := function(level, weight, prec)
+  fileName := "L";
+  fileName cat:= IntegerToString(level);
+  fileName cat:= "W";
+  fileName cat:= IntegerToString(weight);
+  fileName cat:= "P";
+  fileName cat:= IntegerToString(prec);
+  return fileName;
+end function;
+
+// Returns a basis as a sequence of sequences of coefficients.
+getBasis := function(level, weight, prec: write := true)
+  filename := "Bases/";
+  filename cat:= getFileName(level,weight,prec);
+  filename cat:= ".txt";
+  System("touch " cat filename);
+  contents := Read(filename);
+  if not(contents eq "") then 
+    basis := eval(contents);
+    return basis;     
+  else
+  	G := DirichletGroup(level);
+  	
+    M := ModularForms(level,weight);
+    C := CuspidalSubspace(M);
+    B := Basis(C,prec);
+    VC := Matrix(P, #B, 1, B);
+
+    ESeries := EisensteinSeries(M);
+    E := [];
+    for e in ESeries do
+      Append(~E, P!qExpansion(e, prec));
+    end for;
+
+    /* Get and pad the coefficients of the cusp forms, then the Eisenstein series */
+    basis := [];
+    for b in B cat E do
+      basis cat:= [getCoefficientsToPrecision(b, prec)];
+      //#basis;
+    end for;
+    //CoeffMx := Transpose(Matrix(CoeffList));
+
+    if write then
+      Write(filename, basis);
+    else
+      System("rm " cat filename);
+    end if;
+  end if;
+
+  return basis;
+end function;
+
+/*
+  Computes the first prec terms of the q-expansion of the basis 
+  and corresponding dual basis as two sequences. 
+  Returns both a basis for the space of modular forms
+  and a dual basis multiplied by the appropriate sign factor 
+  (1 if weight is 0 mod 4, -1 if weight is 2 mod 4), but not
+  multiplied by a scale factor. 
+*/
+getBasisAndDualBasis := function(level, weight, prec: write := true)
+  filename := "Bases/";
+  filename cat:= getFileName(level,weight,prec);
+  filenameDual := filename cat "Dual.txt";
+  filename cat:= ".txt";
+  System("touch " cat filename);
+  contents := Read(filename);
+  System("touch " cat filenameDual);
+  contentsDual := Read(filenameDual);
+
+  if not(contents eq "" or contentsDual eq "") then 
+    basis := eval(contents);
+    basisDual := eval(contentsDual);
+    return basis, basisDual;     
+  else  
+    M := ModularForms(level,weight);
+    C := CuspidalSubspace(M);
+    A := AtkinLehnerOperator(C,level);
+    B := Basis(C,prec);
+    VC := Matrix(P, #B, 1, B);
+    A := ChangeRing(A, P);
+    VCDual := A * VC;
+
+    BDual := [];
+    for j := 1 to #B do
+      Append(~BDual, VCDual[j,1]);
+    end for;
+
+    ESeries := EisensteinSeries(M);
+    E := [];
+    EDual := [];
+    for e in ESeries do
+      Append(~E, P!qExpansion(e, prec));
+      e2 := AtkinLehnerOperator(level,e);
+      Append(~EDual, P!qExpansion(e2, prec));
+    end for;
+    //E;
+    //EDual;
+
+    multiplier := 1;
+    if (weight mod 4) eq 2 then 
+      multiplier := -1; 
+    end if;
+
+    /* Get and pad the coefficients of the cusp forms, then the Eisenstein series */
+    basis := [];
+    for b in B cat E do
+      basis cat:= [getCoefficientsToPrecision(b, prec)];
+      //#basis;
+    end for;
+
+  /* Get and pad the coefficients on the dual side */
+    basisDual := [];
+    for b in BDual cat EDual do
+      basisDual cat:= [[multiplier * x: x in getCoefficientsToPrecision(b, prec)]];
+    end for;
+    
+    if contents eq "" then
+      if write then
+        Write(filename, basis);
+      else
+        System("rm " cat filename);
+      end if;
+    end if;
+
+    if contentsDual eq "" then
+      if write then
+        Write(filenameDual, basisDual);
+      else
+        System("rm " cat filenameDual);
+      end if;
+    end if;
+  end if;
+  return basis, basisDual;
+end function;
+
+/* Given the sequence [a0, a1, ...], returns a sequence of the
+   same length [a_0, 0, ..., 0, a_1, ...] such that each run 
+   contains (expansionFactor - 1) zeros. */
+ExpandAtPrecision := function(sequence, expansionFactor, weight)
+  prec := # sequence;
+  holder := [Rationals() | 0 : x in [1..prec]];
+  j := 1;
+  while expansionFactor * (j - 1) + 1 le prec do
+    holder[expansionFactor * (j - 1) + 1] := sequence[j];
+    j +:= 1;
+  end while;
+  return holder;
+end function; 
+
+/* Currently assumes rational coefficients. */
+/* Returns the basis and list of expansion factors */
+GetCuspidalNewformBasis := function(level, weight, prec)
+  basis := [];
+  expansions := [];
+  for d in Divisors(level) do
+    C := CuspForms(d, weight);
+    SetPrecision(C, prec);
+    newforms := Newforms(C);
+    if #newforms gt 0 then
+      for fWrapped in newforms do
+        f := qExpansion(fWrapped[1]);
+        seq := getCoefficientsToPrecision(f, prec);
+        for e in Divisors(Integers()!(level/d)) do
+          Append(~basis, ExpandAtPrecision(seq, e, weight));
+          Append(~expansions, e);
+        end for;
+      end for;
+    end if;
+  end for;
+  return basis, expansions;
+end function;
+
+DumbGetNewformBasis := function(level, weight, prec)
+  basis, cExpansions := GetCuspidalNewformBasis(level, weight, prec); 
+  M := ModularForms(level, weight);
+  ESeries := EisensteinSeries(M);
+  E := [P!qExpansion(e,prec): e in ESeries];
+  basis2 := [getCoefficientsToPrecision(f,prec) : f in E];
+  return basis cat basis2, cExpansions;
+  /* Is there a good way to store the Eisenstein data (including the characters?) */
+end function;
+
+// Returns a basis as a sequence of sequences of coefficients.
+getNewFormBasis := function(level, weight, prec: write := true)
+  filename := "Bases/";
+  filename cat:= getFileName(level,weight,prec);
+  filenameExp := filename cat "NewCuspExpansions.txt";
+  filename cat:= "New.txt";
+  System("touch " cat filename);
+  contents := Read(filename);
+  System("touch " cat filenameExp);
+  contentsExp := Read(filenameExp);
+
+  if (contents eq "") or (contentsExp eq "") then
+    basis, cExp := DumbGetNewformBasis(level, weight, prec);
+    if write then
+      System("rm " cat filename);
+      System("rm " cat filenameExp);
+      Write(filename, basis);
+      Write(filenameExp, cExp);
+    else
+      if contents eq "" then
+        System("rm " cat filename);
+      end if;
+      if contentsExp eq "" then
+        System("rm " cat filenameExp);
+      end if;
+    end if;
+  else
+    basis := eval(contents);
+    cExp := eval(contentsExp);
+  end if;
+  return basis, cExp;
+end function;
+
+/*
+Example usage for getting the bases printed to a file:
+First load this file, then use:
+
+level := 24;
+weight := 8;
+prec := 100;
+
+// Variables here are just to suppress output.
+a,b := getBasisAndDualBasis(level, weight, prec);
+c,d := getNewFormBasis(level, weight, prec);
+*/
+
+
